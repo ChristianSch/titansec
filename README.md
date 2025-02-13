@@ -1,14 +1,6 @@
 # Readme
 
-```
-████████╗██╗████████╗ █████╗ ███╗   ██╗
-╚══██╔══╝██║╚══██╔══╝██╔══██╗████╗  ██║
-   ██║   ██║   ██║   ███████║██╔██╗ ██║
-   ██║   ██║   ██║   ██╔══██║██║╚██╗██║
-   ██║   ██║   ██║   ██║  ██║██║ ╚████║
-   ╚═╝   ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═══╝
-      >> Automated attack suite <<
-```
+![titan](screen.png)
 
 Why another one of those? Why not metasploit or any of the others? Because I like to code stuff and it's a great learning experience. Also, metasploit ships a lot of irrelevant shit. The endgoal is to automate the assessment in the future.
 
