@@ -21,7 +21,8 @@ import (
 
 // GlobalConfig stores the configuration for the tool
 type GlobalConfig struct {
-	Target string
+	Target   string
+	Wordlist string
 }
 
 type FtpConfig struct {
@@ -123,7 +124,7 @@ func executor(in string) {
 		}
 	case "enum":
 		if len(args) < 2 {
-			fmt.Println("Usage: enum [os|services]")
+			fmt.Println("Usage: enum [os|services|ftp|dirb]")
 			return
 		}
 		switch args[1] {
@@ -138,6 +139,8 @@ func executor(in string) {
 		case "ftp":
 			ftpEnum()
 			// FIXME:
+		case "dirb":
+			enumDirb()
 		default:
 			fmt.Printf("Unknown enum command: %s\n", args[1])
 		}
@@ -182,7 +185,7 @@ func completer(d prompt.Document) []prompt.Suggest {
 	// Auto-completion for the 'set' command
 	setSubcommands := []prompt.Suggest{
 		{Text: "target", Description: "Set the target IP or hostname"},
-		// Add more settings here
+		{Text: "wordlist", Description: "Set the wordlist for directory busting"},
 	}
 
 	// If the user is typing 'set', suggest the subcommands for 'set'
@@ -194,6 +197,7 @@ func completer(d prompt.Document) []prompt.Suggest {
 		{Text: "os", Description: "Enumerate Operating System of the target"},
 		{Text: "services", Description: "Enumerate services running on the target"},
 		{Text: "ftp", Description: "Enumerate FTP server"},
+		{Text: "dirb", Description: "Directory busting using gobuster"},
 	}
 
 	lookupSubcommands := []prompt.Suggest{
@@ -219,6 +223,9 @@ func setCommand(key, value string) {
 	case "target":
 		config.Target = value
 		fmt.Printf("Target set to %s\n", value)
+	case "wordlist":
+		config.Wordlist = value
+		fmt.Printf("Wordlist set to %s\n", value)
 	default:
 		fmt.Println("Unknown setting:", key)
 	}
@@ -620,6 +627,38 @@ func enumFtpAnon() {
 	}
 
 	discoveries = append(discoveries, disc...)
+}
+
+func enumDirb() {
+	if config.Target == "" {
+		fmt.Println("Target not set")
+		return
+	}
+	if config.Wordlist == "" {
+		fmt.Println("Wordlist not set. Use: set wordlist /path/to/wordlist")
+		return
+	}
+
+	// loading animation
+	stopLoading := lib.StartLoadingAnimation()
+
+	disc, err := tool.DirectoryBust(config.Target, config.Wordlist)
+
+	stopLoading <- true
+
+	if err != nil {
+		lib.Red(fmt.Sprintf("Directory busting failed: %v\n", err))
+		return
+	}
+
+	if len(disc) > 0 {
+		for _, d := range disc {
+			printDiscoveryDetails(d)
+		}
+		discoveries = append(discoveries, disc...)
+	} else {
+		lib.Red("No directories found\n")
+	}
 }
 
 // Reverse shell
