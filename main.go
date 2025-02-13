@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/ChristianSch/titan/lib"
 	"github.com/ChristianSch/titan/reporting"
@@ -13,7 +14,9 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/fatih/color"
 	"github.com/jlaffaye/ftp"
+	"github.com/pkg/term/termios"
 	"github.com/rodaine/table"
+	"golang.org/x/sys/unix"
 )
 
 // GlobalConfig stores the configuration for the tool
@@ -27,11 +30,20 @@ type FtpConfig struct {
 	Password *string
 }
 
+type ShellConfig struct {
+	Port  *int
+	Shell *string
+}
+
 var (
 	config      GlobalConfig
 	ftpConfig   FtpConfig
 	ftpConn     *ftp.ServerConn
+	shellConfig ShellConfig
 	discoveries []reporting.Discovery
+	// save original terminal config to allow ctrl-c to work
+	fd                     int
+	originalTerminalConfig *unix.Termios
 )
 
 func banner() {
@@ -42,6 +54,10 @@ func banner() {
 
 func main() {
 	banner()
+
+	// before we run anything, we need to save the original terminal config to allow ctrl-c to work
+	saveTerminalConfig()
+
 	fmt.Println("Use >tab for an overview of commands. Ctrl+D or exit to leave.")
 	p := prompt.New(
 		executor,
@@ -54,6 +70,26 @@ func main() {
 	// clean up
 	if ftpConn != nil {
 		ftpConn.Quit()
+	}
+}
+
+func saveTerminalConfig() {
+	fd, err := syscall.Open("/dev/tty", syscall.O_RDONLY, 0)
+	if err != nil {
+		panic(err)
+	}
+
+	// get the original settings
+	originalTerminalConfig, err = termios.Tcgetattr(uintptr(fd))
+	if err != nil {
+		panic(err)
+	}
+}
+
+// restoreTerminalConfig restores the original terminal config
+func restoreTerminalConfig() {
+	if err := termios.Tcsetattr(uintptr(fd), termios.TCSANOW, (*unix.Termios)(originalTerminalConfig)); err != nil {
+		panic(err)
 	}
 }
 
@@ -85,8 +121,6 @@ func executor(in string) {
 			enumServices()
 		case "ftp":
 			ftpEnum()
-		case "smb":
-			fmt.Println("Enumerating SMB...")
 			// FIXME:
 		default:
 			fmt.Printf("Unknown enum command: %s\n", args[1])
@@ -100,6 +134,9 @@ func executor(in string) {
 				fmt.Println("Error closing connection:", err)
 			}
 		}
+
+	case "shell":
+		shellMode()
 
 	case "disco":
 		// Print all discoveries
@@ -119,6 +156,7 @@ func completer(d prompt.Document) []prompt.Suggest {
 	commands := []prompt.Suggest{
 		{Text: "enum", Description: "Enumerate targets using nmap"},
 		{Text: "ftp", Description: "Interact with an FTP server"},
+		{Text: "shell", Description: "Start a reverse shell"},
 		{Text: "set", Description: "Set a global variable"},
 		{Text: "exit", Description: "Exit the program"},
 		{Text: "disco", Description: "Show all discoveries so far"},
@@ -139,7 +177,6 @@ func completer(d prompt.Document) []prompt.Suggest {
 		{Text: "os", Description: "Enumerate Operating System of the target"},
 		{Text: "services", Description: "Enumerate services running on the target"},
 		{Text: "ftp", Description: "Enumerate FTP server"},
-		{Text: "smb", Description: "Enumerate SMB server"},
 	}
 
 	// Check if the current line starts with 'enum'
@@ -463,6 +500,19 @@ func ftpCompleter(d prompt.Document) []prompt.Suggest {
 		// Add more FTP command suggestions here
 		{Text: "exit", Description: "Exit FTP mode"},
 	}
+
+	// Auto-completion for the 'set' command
+	setSubcommands := []prompt.Suggest{
+		{Text: "user", Description: "Set the FTP username"},
+		{Text: "password", Description: "Set the FTP password"},
+		{Text: "port", Description: "Set the FTP port"},
+	}
+
+	// If the user is typing 'set', suggest the subcommands for 'set'
+	if strings.HasPrefix(d.TextBeforeCursor(), "set ") {
+		return prompt.FilterHasPrefix(setSubcommands, d.GetWordAfterCursorWithSpace(), true)
+	}
+
 	return prompt.FilterHasPrefix(s, d.GetWordBeforeCursor(), true)
 }
 
@@ -544,4 +594,111 @@ func enumFtpAnon() {
 	}
 
 	discoveries = append(discoveries, disc...)
+}
+
+// Reverse shell
+func shellMode() {
+	fmt.Println("Entering shell mode. Type 'exit' to return or 'run' to start listening.")
+
+	p := prompt.New(
+		shellExecutor,
+		shellCompleter,
+		prompt.OptionPrefix("rev> "),
+		prompt.OptionTitle("Reverse shell"),
+	)
+	p.Run()
+}
+
+func shellExecutor(in string) {
+	in = strings.TrimSpace(in)
+	args := strings.Fields(in)
+
+	if len(args) == 0 {
+		return
+	}
+
+	switch args[0] {
+	case "exit":
+		fmt.Println("Exiting reverse shell mode...")
+		// close connection, if any
+		return // Exit FTP mode
+
+	case "set":
+		if len(args) < 3 {
+			fmt.Println("Usage: set [key] [value]")
+			return
+		}
+		setShellCommand(args[1], args[2])
+
+	case "run":
+		restoreTerminalConfig()
+		reverseShell()
+
+	default:
+		fmt.Printf("Unknown reverse shell command: %s\n", in)
+	}
+}
+
+func shellCompleter(d prompt.Document) []prompt.Suggest {
+	s := []prompt.Suggest{
+		{Text: "set", Description: "Set a local variable"},
+		{Text: "run", Description: "Start reverse shell"},
+		{Text: "exit", Description: "Exit reverse shell mode"},
+	}
+
+	// Auto-completion for the 'set' command
+	setSubcommands := []prompt.Suggest{
+		{Text: "port", Description: "Set the port to listen on"},
+		{Text: "shell", Description: "Set the shell to use"},
+	}
+
+	// If the user is typing 'set', suggest the subcommands for 'set'
+	if strings.HasPrefix(d.TextBeforeCursor(), "set ") {
+		return prompt.FilterHasPrefix(setSubcommands, d.GetWordAfterCursorWithSpace(), true)
+	}
+
+	return prompt.FilterHasPrefix(s, d.GetWordBeforeCursor(), true)
+}
+
+func setShellCommand(key, value string) {
+	switch key {
+	case "port":
+		port, err := strconv.Atoi(value)
+		if err != nil {
+			fmt.Println("Invalid port:", value)
+			return
+		}
+
+		shellConfig.Port = &port
+		fmt.Printf("Port set to %d\n", port)
+	case "shell":
+		shellConfig.Shell = &value
+		fmt.Printf("Shell set to %s\n", value)
+	default:
+		fmt.Println("Unknown setting:", key)
+	}
+}
+
+func reverseShell() {
+	fmt.Println("Starting reverse shell...")
+	var port int
+	var shell string
+
+	// check for config
+	if shellConfig.Port == nil {
+		port = 4045
+	} else {
+		port = *shellConfig.Port
+	}
+
+	if shellConfig.Shell == nil {
+		shell = "/bin/bash"
+	} else {
+		shell = *shellConfig.Shell
+	}
+
+	// check if we have port and shell set
+	if err := tool.ReverseShell(port, shell); err != nil {
+		fmt.Println("Error starting reverse shell:", err)
+	}
 }
