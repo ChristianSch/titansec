@@ -105,6 +105,22 @@ func executor(in string) {
 	case "exit":
 		fmt.Println("Exiting...")
 		os.Exit(0)
+	case "lookup":
+		if len(args) < 3 {
+			fmt.Println("Usage: lookup [subcommand] [domain]")
+			return
+		}
+		switch args[1] {
+		case "ip":
+			ip, err := tool.ResolveDomain(args[2])
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				return
+			}
+			fmt.Println(ip)
+		default:
+			fmt.Printf("Unknown lookup subcommand: %s\n", args[1])
+		}
 	case "enum":
 		if len(args) < 2 {
 			fmt.Println("Usage: enum [os|services]")
@@ -160,6 +176,7 @@ func completer(d prompt.Document) []prompt.Suggest {
 		{Text: "set", Description: "Set a global variable"},
 		{Text: "exit", Description: "Exit the program"},
 		{Text: "disco", Description: "Show all discoveries so far"},
+		{Text: "lookup", Description: "DNS lookup tools"},
 	}
 
 	// Auto-completion for the 'set' command
@@ -179,9 +196,18 @@ func completer(d prompt.Document) []prompt.Suggest {
 		{Text: "ftp", Description: "Enumerate FTP server"},
 	}
 
+	lookupSubcommands := []prompt.Suggest{
+		{Text: "ip", Description: "Resolve domain name to IP address"},
+	}
+
 	// Check if the current line starts with 'enum'
 	if strings.HasPrefix(d.TextBeforeCursor(), "enum ") {
 		return prompt.FilterHasPrefix(enumSubcommands, d.GetWordAfterCursorWithSpace(), true)
+	}
+
+	// Check if the current line starts with 'lookup'
+	if strings.HasPrefix(d.TextBeforeCursor(), "lookup ") {
+		return prompt.FilterHasPrefix(lookupSubcommands, d.GetWordAfterCursorWithSpace(), true)
 	}
 
 	// For all other inputs, suggest the main commands
